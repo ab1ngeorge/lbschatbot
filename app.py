@@ -1,34 +1,41 @@
-# app.py - LBSCEK RAG Chatbot (Complete Fixed Version)
+# app.py - LBSCEK RAG Chatbot (Fixed)
 import streamlit as st
 import os
-import sys
 import logging
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List
 import json
-import requests
 
-# --------------- LOGGING ---------------
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# --------------- PAGE CONFIG (MUST BE FIRST ST COMMAND) ---------------
+# --------------- PAGE CONFIG (MUST BE FIRST!) ---------------
 st.set_page_config(
     page_title="LBSCEK AI Assistant",
     page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
+# Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # --------------- DEPENDENCY CHECK ---------------
+REQUIRED_PACKAGES = """
+streamlit>=1.31.0
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-openai>=0.1.0
+langchain-text-splitters>=0.2.0
+openai>=1.12.0
+faiss-cpu>=1.9.0
+tiktoken>=0.6.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+requests>=2.31.0
+aiohttp>=3.9.0
+"""
+
 def check_dependencies():
-    """Check and display missing dependencies"""
+    """Check all required dependencies"""
     missing = []
-    
-    try:
-        import langchain
-    except ImportError:
-        missing.append("langchain")
     
     try:
         import langchain_community
@@ -41,12 +48,17 @@ def check_dependencies():
         missing.append("langchain-openai")
     
     try:
+        import langchain_text_splitters
+    except ImportError:
+        missing.append("langchain-text-splitters")
+    
+    try:
         import faiss
     except ImportError:
         missing.append("faiss-cpu")
     
     try:
-        from bs4 import BeautifulSoup
+        import bs4
     except ImportError:
         missing.append("beautifulsoup4")
     
@@ -57,40 +69,16 @@ def check_dependencies():
     
     return missing
 
-# Check dependencies first
-missing_deps = check_dependencies()
+missing_packages = check_dependencies()
 
-if missing_deps:
-    st.error("❌ Missing Dependencies Detected!")
-    st.markdown(f"""
-    ### Missing packages: `{', '.join(missing_deps)}`
-    
-    **Please create/update your `requirements.txt` file with:**
-    
-    ```
-    streamlit==1.31.0
-    langchain==0.1.9
-    langchain-community==0.0.24
-    langchain-openai==0.0.8
-    langchain-text-splitters==0.0.1
-    openai==1.12.0
-    faiss-cpu==1.7.4
-    tiktoken==0.6.0
-    beautifulsoup4==4.12.3
-    lxml==5.1.0
-    requests==2.31.0
-    urllib3==2.2.0
-    ```
-    
-    **Steps to fix:**
-    1. Create `requirements.txt` in your repo root
-    2. Copy the above content
-    3. Commit and push to GitHub
-    4. Reboot the app (Manage app → Reboot)
-    """)
+if missing_packages:
+    st.error(f"❌ Missing packages: {', '.join(missing_packages)}")
+    st.markdown("### Fix: Update your `requirements.txt`:")
+    st.code(REQUIRED_PACKAGES, language="text")
+    st.info("After updating, go to **Manage app** → **Reboot app**")
     st.stop()
 
-# --------------- IMPORTS (After dependency check) ---------------
+# --------------- IMPORTS ---------------
 try:
     from langchain_community.document_loaders import WebBaseLoader
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -99,93 +87,29 @@ try:
     from langchain.chains import ConversationalRetrievalChain
     from langchain.memory import ConversationBufferWindowMemory
     from langchain.schema import Document
-    LANGCHAIN_AVAILABLE = True
 except ImportError as e:
-    LANGCHAIN_AVAILABLE = False
-    IMPORT_ERROR = str(e)
-
-if not LANGCHAIN_AVAILABLE:
-    st.error(f"❌ Import Error: {IMPORT_ERROR}")
-    st.markdown("""
-    ### Please ensure requirements.txt is correct and reboot the app.
-    
-    Go to **Manage app** → **Reboot app**
-    """)
+    st.error(f"❌ Import Error: {e}")
+    st.code(REQUIRED_PACKAGES, language="text")
     st.stop()
 
-# --------------- CUSTOM CSS ---------------
+# --------------- CSS ---------------
 st.markdown("""
 <style>
-    /* Main container */
-    .main .block-container {
-        padding-top: 1rem;
-        padding-bottom: 2rem;
-        max-width: 1200px;
-    }
-    
-    /* Header */
     .main-header {
         background: linear-gradient(135deg, #1a365d 0%, #2563eb 100%);
         padding: 2rem;
         border-radius: 1rem;
         color: white;
-        margin-bottom: 1.5rem;
         text-align: center;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        margin-bottom: 1.5rem;
     }
-    
-    .main-header h1 {
-        margin: 0;
-        font-size: 2.2rem;
-        font-weight: 700;
-    }
-    
-    .main-header p {
-        margin: 0.5rem 0 0 0;
-        opacity: 0.9;
-        font-size: 1.1rem;
-    }
-    
-    /* Chat container */
-    .stChatMessage {
-        padding: 1rem;
-        border-radius: 0.75rem;
-    }
-    
-    /* Buttons */
-    .stButton > button {
-        border-radius: 0.5rem;
-        font-weight: 500;
-        transition: all 0.2s;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-    
-    /* Quick question buttons */
-    div[data-testid="column"] .stButton > button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.5rem 1rem;
-        font-size: 0.85rem;
-    }
-    
-    /* Info boxes */
-    .info-box {
-        background: #f0f9ff;
-        border-left: 4px solid #2563eb;
-        padding: 1rem;
-        border-radius: 0 0.5rem 0.5rem 0;
-        margin: 1rem 0;
-    }
-    
-    /* Hide Streamlit branding */
+    .main-header h1 { margin: 0; font-size: 2rem; }
+    .main-header p { margin: 0.5rem 0 0 0; opacity: 0.9; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    .stDeployButton {display: none;}
+    .stButton > button {
+        border-radius: 0.5rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -199,39 +123,31 @@ LBSCEK_URLS = [
     "https://lbscek.ac.in/placements/",
     "https://lbscek.ac.in/facilities/",
     "https://lbscek.ac.in/contact-us/",
-    "https://lbscek.ac.in/programmes/",
-    "https://lbscek.ac.in/hostel/",
-    "https://lbscek.ac.in/library/",
-    "https://lbscek.ac.in/vision-mission/",
 ]
 
 QUICK_QUESTIONS = [
-    ("📚", "What courses are offered at LBSCEK?"),
-    ("🎯", "How to apply for admission?"),
-    ("💼", "Tell me about placements"),
-    ("👨‍🏫", "Who are the faculty members?"),
-    ("🏛️", "What facilities are available?"),
-    ("📍", "Where is the college located?"),
+    "📚 What courses are offered?",
+    "🎯 How to apply for admission?",
+    "💼 Tell me about placements",
+    "👨‍🏫 Faculty information",
+    "🏛️ What facilities available?",
+    "📍 College location?",
 ]
 
 WELCOME_MESSAGE = """👋 **Welcome to LBSCEK AI Assistant!**
 
-I'm here to help you with information about **LBS College of Engineering Kasaragod**.
+I can help you with:
+- 📚 Courses & Programs
+- 🎯 Admissions
+- 💼 Placements
+- 👨‍🏫 Faculty
+- 🏛️ Facilities
+- 📍 Contact Info
 
-**I can answer questions about:**
-- 📚 Academic programs and courses
-- 🎯 Admission process and eligibility
-- 💼 Placement statistics and companies
-- 👨‍🏫 Faculty and departments
-- 🏛️ Facilities and infrastructure
-- 📍 Contact information and location
-
-**Try asking:** "What are the departments at LBSCEK?" or click a quick question below!
-"""
+Ask me anything about LBSCEK!"""
 
 # --------------- SESSION STATE ---------------
-def initialize_session_state():
-    """Initialize all session state variables"""
+def init_session_state():
     defaults = {
         "messages": [],
         "api_key": "",
@@ -240,531 +156,389 @@ def initialize_session_state():
         "vectorstore_built": False,
         "qa_chain": None,
         "total_questions": 0,
-        "error_count": 0,
     }
-    
-    for key, value in defaults.items():
+    for key, val in defaults.items():
         if key not in st.session_state:
-            st.session_state[key] = value
+            st.session_state[key] = val
 
-initialize_session_state()
+init_session_state()
 
-# --------------- UTILITY FUNCTIONS ---------------
-def is_valid_api_key(api_key: str) -> bool:
-    """Validate OpenAI API key format"""
-    if not api_key:
+# --------------- HELPER FUNCTIONS ---------------
+def is_valid_api_key(key: str) -> bool:
+    """Validate API key format"""
+    if not key:
         return False
-    api_key = api_key.strip()
-    return api_key.startswith("sk-") and len(api_key) > 30
+    key = key.strip()
+    # OpenAI keys start with sk- and are usually 51+ chars
+    # Also allow sk-proj- format
+    return (key.startswith("sk-") and len(key) > 30)
 
-def fetch_url_content(url: str, timeout: int = 15) -> Optional[str]:
-    """Fetch content from URL with error handling"""
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=timeout)
-        response.raise_for_status()
-        return response.text
-    except Exception as e:
-        logger.warning(f"Failed to fetch {url}: {e}")
-        return None
-
-def load_lbscek_documents() -> List[Document]:
-    """Load documents from LBSCEK website"""
-    documents = []
-    failed_urls = []
+def load_documents_safe() -> List[Document]:
+    """Load LBSCEK website pages with error handling"""
+    docs = []
+    failed = []
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    progress = st.progress(0, text="Loading pages...")
     
     for i, url in enumerate(LBSCEK_URLS):
-        status_text.text(f"📥 Loading: {url}")
-        
         try:
             loader = WebBaseLoader(
                 web_paths=[url],
-                bs_kwargs={
-                    "parse_only": None,
-                    "features": "lxml"
-                }
+                bs_kwargs={"features": "lxml"}
             )
-            loader.requests_per_second = 1
-            docs = loader.load()
-            
-            # Add metadata
-            for doc in docs:
+            loaded = loader.load()
+            for doc in loaded:
                 doc.metadata["source"] = url
-                doc.metadata["loaded_at"] = datetime.now().isoformat()
-            
-            documents.extend(docs)
-            logger.info(f"Loaded: {url}")
-            
+            docs.extend(loaded)
+            logger.info(f"✓ Loaded: {url}")
         except Exception as e:
-            logger.warning(f"Failed to load {url}: {e}")
-            failed_urls.append(url)
+            logger.warning(f"✗ Failed {url}: {e}")
+            failed.append(url)
         
-        progress_bar.progress((i + 1) / len(LBSCEK_URLS))
+        progress.progress((i + 1) / len(LBSCEK_URLS), text=f"Loading: {url}")
     
-    progress_bar.empty()
-    status_text.empty()
+    progress.empty()
     
-    if failed_urls:
-        st.warning(f"⚠️ Could not load {len(failed_urls)} pages. Using available content.")
-        with st.expander("View failed URLs"):
-            for url in failed_urls:
-                st.text(url)
+    if failed:
+        st.warning(f"⚠️ Could not load {len(failed)} pages: {', '.join(failed)}")
     
-    return documents
-
-def split_documents(documents: List[Document]) -> List[Document]:
-    """Split documents into chunks"""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        length_function=len,
-        separators=["\n\n", "\n", ". ", " ", ""]
-    )
-    return splitter.split_documents(documents)
+    if not docs:
+        st.error("❌ Failed to load any pages!")
+    
+    return docs
 
 @st.cache_resource(show_spinner=False)
-def create_vectorstore(_api_key: str) -> Optional[FAISS]:
-    """Create FAISS vectorstore from documents"""
+def build_vectorstore(_api_key: str):
+    """Build FAISS vectorstore from LBSCEK pages"""
     try:
         os.environ["OPENAI_API_KEY"] = _api_key
         
         with st.status("🔄 Building Knowledge Base...", expanded=True) as status:
-            # Step 1: Load documents
-            st.write("📥 **Step 1/3:** Loading LBSCEK website pages...")
-            documents = load_lbscek_documents()
+            # Load documents
+            st.write("📥 Loading LBSCEK website pages...")
+            docs = load_documents_safe()
             
-            if not documents:
-                st.error("❌ Failed to load any documents!")
+            if not docs:
                 return None
             
-            st.write(f"✅ Loaded **{len(documents)}** pages")
+            st.write(f"✅ Loaded {len(docs)} pages")
             
-            # Step 2: Split documents
-            st.write("✂️ **Step 2/3:** Splitting into chunks...")
-            chunks = split_documents(documents)
-            st.write(f"✅ Created **{len(chunks)}** text chunks")
+            # Split documents
+            st.write("✂️ Splitting into chunks...")
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                separators=["\n\n", "\n", ". ", " ", ""]
+            )
+            chunks = splitter.split_documents(docs)
+            st.write(f"✅ Created {len(chunks)} chunks")
             
-            # Step 3: Create embeddings
-            st.write("🧠 **Step 3/3:** Creating embeddings (this may take a minute)...")
+            # Create embeddings
+            st.write("🧠 Creating embeddings (this may take a minute)...")
             embeddings = OpenAIEmbeddings(
-                model="text-embedding-3-small",
-                openai_api_key=_api_key
+                openai_api_key=_api_key,
+                model="text-embedding-3-small"
             )
-            
-            vectorstore = FAISS.from_documents(
-                documents=chunks,
-                embedding=embeddings
-            )
+            vectorstore = FAISS.from_documents(chunks, embeddings)
             
             status.update(label="✅ Knowledge Base Ready!", state="complete", expanded=False)
         
         return vectorstore
         
     except Exception as e:
-        logger.error(f"Vectorstore creation failed: {e}")
-        st.error(f"❌ Error creating knowledge base: {str(e)}")
+        logger.error(f"Vectorstore error: {e}")
+        st.error(f"❌ Error building knowledge base: {str(e)}")
+        
+        if "api" in str(e).lower() or "key" in str(e).lower() or "auth" in str(e).lower():
+            st.warning("💡 Check your OpenAI API key - it may be invalid or have no credits")
+        
         return None
 
-def create_qa_chain(vectorstore: FAISS, api_key: str):
-    """Create the QA chain"""
-    try:
-        llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0.1,
-            openai_api_key=api_key,
-            max_tokens=1000,
-        )
-        
-        memory = ConversationBufferWindowMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="answer",
-            k=5  # Remember last 5 exchanges
-        )
-        
-        retriever = vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 4}
-        )
-        
-        qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=llm,
-            retriever=retriever,
-            memory=memory,
-            return_source_documents=True,
-            verbose=False,
-        )
-        
-        return qa_chain
-        
-    except Exception as e:
-        logger.error(f"QA chain creation failed: {e}")
-        raise
+def create_qa_chain(vectorstore, api_key: str):
+    """Create conversational QA chain"""
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.1,
+        openai_api_key=api_key,
+        max_tokens=1000
+    )
+    
+    memory = ConversationBufferWindowMemory(
+        memory_key="chat_history",
+        return_messages=True,
+        output_key="answer",
+        k=5
+    )
+    
+    retriever = vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 4}
+    )
+    
+    qa_chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=retriever,
+        memory=memory,
+        return_source_documents=True,
+        verbose=False
+    )
+    
+    return qa_chain
 
-def format_source_documents(sources: List[Document]) -> str:
-    """Format source documents for display"""
+def format_sources(sources) -> str:
+    """Format source documents"""
     if not sources:
-        return "_No sources found_"
+        return ""
     
-    seen_urls = set()
-    formatted_sources = []
+    seen = set()
+    result = []
     
-    for i, doc in enumerate(sources, 1):
+    for doc in sources:
         url = doc.metadata.get("source", "Unknown")
-        
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        
-        content_preview = doc.page_content[:200].replace("\n", " ").strip()
-        if len(doc.page_content) > 200:
-            content_preview += "..."
-        
-        formatted_sources.append(
-            f"**Source {i}:** [{url}]({url})\n"
-            f"> {content_preview}"
-        )
+        if url not in seen:
+            seen.add(url)
+            preview = doc.page_content[:150].replace("\n", " ").strip()
+            result.append(f"🔗 **{url}**\n> {preview}...")
     
-    return "\n\n".join(formatted_sources)
+    return "\n\n".join(result)
 
-def process_user_question(question: str) -> Dict:
-    """Process a user question and return response"""
+def process_question(question: str) -> dict:
+    """Process user question"""
     try:
+        # Create QA chain if needed
         if st.session_state.qa_chain is None:
             st.session_state.qa_chain = create_qa_chain(
                 st.session_state.vectorstore,
                 st.session_state.api_key
             )
         
+        # Get answer
         result = st.session_state.qa_chain.invoke({"question": question})
         
         return {
             "success": True,
-            "answer": result.get("answer", "I couldn't find an answer to that question."),
+            "answer": result.get("answer", "Sorry, I couldn't find an answer."),
             "sources": result.get("source_documents", [])
         }
         
     except Exception as e:
-        logger.error(f"Error processing question: {e}")
+        logger.error(f"QA error: {e}")
         return {
             "success": False,
-            "answer": f"Sorry, I encountered an error: {str(e)}",
+            "answer": f"❌ Error: {str(e)}",
             "sources": []
         }
 
-# --------------- UI COMPONENTS ---------------
-def render_header():
-    """Render the main header"""
-    st.markdown("""
-    <div class="main-header">
-        <h1>🎓 LBS College of Engineering Kasaragod</h1>
-        <p>AI-Powered Assistant • Your Guide to LBSCEK</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-def render_sidebar():
-    """Render the sidebar"""
-    with st.sidebar:
-        st.markdown("## 🎓 LBSCEK Chatbot")
-        st.markdown("---")
-        
-        # API Key Section
-        st.markdown("### 🔑 OpenAI API Key")
-        
-        api_key_input = st.text_input(
-            "Enter your API key",
-            type="password",
-            value=st.session_state.api_key,
-            placeholder="sk-...",
-            help="Get your API key from https://platform.openai.com/api-keys",
-            label_visibility="collapsed"
-        )
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("✅ Connect", use_container_width=True, type="primary"):
-                if is_valid_api_key(api_key_input):
-                    st.session_state.api_key = api_key_input.strip()
-                    st.session_state.api_key_valid = True
-                    os.environ["OPENAI_API_KEY"] = st.session_state.api_key
-                    st.success("Connected!")
-                    st.rerun()
-                else:
-                    st.error("Invalid API key format!")
-        
-        with col2:
-            if st.button("🔄 Reset", use_container_width=True):
-                # Clear all session state
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.cache_resource.clear()
+# --------------- SIDEBAR ---------------
+with st.sidebar:
+    st.header("🎓 LBSCEK Chatbot")
+    st.markdown("---")
+    
+    # API Key Section
+    st.subheader("🔑 API Key")
+    api_input = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        value=st.session_state.api_key,
+        placeholder="sk-...",
+        help="Get from https://platform.openai.com/api-keys"
+    )
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("✅ Connect", use_container_width=True, type="primary"):
+            if is_valid_api_key(api_input):
+                st.session_state.api_key = api_input.strip()
+                st.session_state.api_key_valid = True
+                os.environ["OPENAI_API_KEY"] = st.session_state.api_key
+                st.success("Connected!")
                 st.rerun()
-        
-        # Connection status
-        if st.session_state.api_key_valid:
-            st.success("✅ API Connected")
-        else:
-            st.warning("⚠️ API Key Required")
-        
-        st.markdown("---")
-        
-        # Statistics
-        st.markdown("### 📊 Session Stats")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Questions", st.session_state.total_questions)
-        with col2:
-            st.metric("Messages", len(st.session_state.messages))
-        
-        st.markdown("---")
-        
-        # Actions
-        st.markdown("### 🛠️ Actions")
-        
-        if st.button("🗑️ Clear Chat History", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.total_questions = 0
-            st.session_state.qa_chain = None
-            st.rerun()
-        
-        if st.button("🔄 Rebuild Knowledge Base", use_container_width=True):
-            st.session_state.vectorstore = None
-            st.session_state.vectorstore_built = False
-            st.session_state.qa_chain = None
+            else:
+                st.error("Invalid key format!")
+    
+    with col2:
+        if st.button("🔄 Reset All", use_container_width=True):
+            # Clear everything
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.cache_resource.clear()
             st.rerun()
-        
-        # Export chat
-        if st.session_state.messages:
-            export_data = {
-                "exported_at": datetime.now().isoformat(),
-                "total_messages": len(st.session_state.messages),
-                "messages": st.session_state.messages
-            }
-            
-            st.download_button(
-                "📥 Export Chat History",
-                data=json.dumps(export_data, indent=2),
-                file_name=f"lbscek_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-        
-        st.markdown("---")
-        
-        # Help section
-        with st.expander("ℹ️ Help & Info"):
-            st.markdown("""
-            **How to use:**
-            1. Enter your OpenAI API key
-            2. Click "Connect"
-            3. Wait for knowledge base to build
-            4. Start asking questions!
-            
-            **Get API Key:**
-            1. Go to [OpenAI Platform](https://platform.openai.com)
-            2. Sign up or log in
-            3. Navigate to API Keys
-            4. Create a new key
-            
-            **Topics I know about:**
-            - Admissions & Programs
-            - Departments & Faculty
-            - Placements
-            - Facilities
-            - Contact Info
-            
-            **Tips:**
-            - Be specific in your questions
-            - Use quick questions for common topics
-            - Check sources for detailed info
-            """)
-        
-        st.markdown("---")
-        st.caption("Made with ❤️ for LBSCEK")
-
-def render_quick_questions() -> Optional[str]:
-    """Render quick question buttons and return selected question"""
-    st.markdown("**💡 Quick Questions:**")
     
-    cols = st.columns(3)
-    selected_question = None
+    # Status
+    if st.session_state.api_key_valid:
+        st.success("✅ API Connected")
+    else:
+        st.warning("⚠️ Enter API Key")
     
-    for i, (emoji, question) in enumerate(QUICK_QUESTIONS):
-        with cols[i % 3]:
-            button_label = f"{emoji} {question[:25]}..." if len(question) > 25 else f"{emoji} {question}"
-            if st.button(button_label, key=f"quick_{i}", use_container_width=True):
-                selected_question = question
-    
-    return selected_question
-
-def render_chat_messages():
-    """Render all chat messages"""
-    for message in st.session_state.messages:
-        role = message["role"]
-        content = message["content"]
-        avatar = "🎓" if role == "assistant" else "👤"
-        
-        with st.chat_message(role, avatar=avatar):
-            st.markdown(content)
-            
-            # Show sources if available
-            if role == "assistant" and message.get("sources"):
-                with st.expander("📄 View Sources", expanded=False):
-                    st.markdown(message["sources"])
-
-def render_api_key_prompt():
-    """Render the API key prompt for new users"""
-    st.info("👋 Welcome! Please enter your OpenAI API key in the sidebar to get started.")
-    
-    with st.expander("🔐 How to get an OpenAI API Key", expanded=True):
-        st.markdown("""
-        ### Steps to get your API key:
-        
-        1. **Visit OpenAI Platform**
-           - Go to [platform.openai.com](https://platform.openai.com)
-        
-        2. **Sign Up or Log In**
-           - Create an account or sign in to existing one
-        
-        3. **Navigate to API Keys**
-           - Click on your profile → "View API keys"
-           - Or go directly to [API Keys page](https://platform.openai.com/api-keys)
-        
-        4. **Create New Key**
-           - Click "Create new secret key"
-           - Give it a name (e.g., "LBSCEK Chatbot")
-           - Copy the key immediately (you won't see it again!)
-        
-        5. **Add Credits (if needed)**
-           - New accounts get free credits
-           - Add payment method if credits are exhausted
-        
-        ### ⚠️ Important:
-        - Keep your API key secret
-        - Don't share it publicly
-        - Each query costs a small amount
-        """)
-    
-    # Show a demo question
     st.markdown("---")
-    st.markdown("### 🎯 Example Questions You Can Ask:")
     
-    demo_cols = st.columns(2)
-    with demo_cols[0]:
-        st.markdown("""
-        - What courses are offered at LBSCEK?
-        - How do I apply for admission?
-        - What is the placement record?
-        """)
-    with demo_cols[1]:
-        st.markdown("""
-        - Tell me about the faculty
-        - What facilities are available?
-        - Where is the college located?
-        """)
-
-# --------------- MAIN APPLICATION ---------------
-def main():
-    """Main application entry point"""
+    # Stats
+    st.subheader("📊 Stats")
+    col1, col2 = st.columns(2)
+    col1.metric("Questions", st.session_state.total_questions)
+    col2.metric("Messages", len(st.session_state.messages))
     
-    # Render sidebar
-    render_sidebar()
+    st.markdown("---")
     
-    # Render header
-    render_header()
+    # Actions
+    st.subheader("🛠️ Actions")
     
-    # Check if API key is set
-    if not st.session_state.api_key_valid:
-        render_api_key_prompt()
-        return
-    
-    # Build vectorstore if needed
-    if not st.session_state.vectorstore_built:
-        vectorstore = create_vectorstore(st.session_state.api_key)
-        
-        if vectorstore is None:
-            st.error("❌ Failed to build knowledge base. Please check your API key and try again.")
-            
-            if st.button("🔄 Retry"):
-                st.cache_resource.clear()
-                st.rerun()
-            return
-        
-        st.session_state.vectorstore = vectorstore
-        st.session_state.vectorstore_built = True
+    if st.button("🗑️ Clear Chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.total_questions = 0
+        st.session_state.qa_chain = None
         st.rerun()
     
-    # Quick questions
-    selected_quick_question = render_quick_questions()
+    if st.button("🔄 Rebuild Knowledge Base", use_container_width=True):
+        st.session_state.vectorstore = None
+        st.session_state.vectorstore_built = False
+        st.session_state.qa_chain = None
+        st.cache_resource.clear()
+        st.rerun()
+    
+    # Export
+    if st.session_state.messages:
+        export_data = {
+            "exported": datetime.now().isoformat(),
+            "messages": st.session_state.messages
+        }
+        st.download_button(
+            "📥 Export Chat",
+            json.dumps(export_data, indent=2),
+            f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
     
     st.markdown("---")
     
-    # Initialize with welcome message
-    if not st.session_state.messages:
+    # Help
+    with st.expander("ℹ️ Help"):
+        st.markdown("""
+        **How to use:**
+        1. Get API key from [OpenAI](https://platform.openai.com/api-keys)
+        2. Enter key and click **Connect**
+        3. Wait for knowledge base to build
+        4. Start asking questions!
+        
+        **Tips:**
+        - Be specific in your questions
+        - Check sources for details
+        - Use quick questions for common topics
+        """)
+
+# --------------- MAIN CONTENT ---------------
+# Header
+st.markdown("""
+<div class="main-header">
+    <h1>🎓 LBS College of Engineering Kasaragod</h1>
+    <p>AI Assistant • Powered by Official Website</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Check API key
+if not st.session_state.api_key_valid:
+    st.info("👋 Enter your OpenAI API key in the sidebar to start!")
+    
+    with st.expander("🔐 How to get an API key", expanded=True):
+        st.markdown("""
+        ### Steps:
+        1. Go to [platform.openai.com](https://platform.openai.com)
+        2. Sign up or log in
+        3. Navigate to **API Keys** section
+        4. Click **Create new secret key**
+        5. Copy the key and paste it in the sidebar
+        
+        ⚠️ **Note:** You need credits in your OpenAI account
+        """)
+    
+    st.stop()
+
+# Build vectorstore if needed
+if not st.session_state.vectorstore_built:
+    vs = build_vectorstore(st.session_state.api_key)
+    
+    if vs is None:
+        st.error("❌ Failed to build knowledge base!")
+        if st.button("🔄 Retry"):
+            st.cache_resource.clear()
+            st.rerun()
+        st.stop()
+    
+    st.session_state.vectorstore = vs
+    st.session_state.vectorstore_built = True
+    st.rerun()
+
+# Quick Questions
+st.markdown("**💡 Quick Questions:**")
+cols = st.columns(3)
+selected_quick_q = None
+
+for i, q in enumerate(QUICK_QUESTIONS):
+    with cols[i % 3]:
+        if st.button(q, key=f"quick_{i}", use_container_width=True):
+            selected_quick_q = q.split(" ", 1)[1]  # Remove emoji
+
+st.markdown("---")
+
+# Initialize welcome message
+if not st.session_state.messages:
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": WELCOME_MESSAGE,
+        "sources": ""
+    })
+
+# Display chat messages
+for msg in st.session_state.messages:
+    avatar = "🎓" if msg["role"] == "assistant" else "👤"
+    
+    with st.chat_message(msg["role"], avatar=avatar):
+        st.markdown(msg["content"])
+        
+        if msg.get("sources"):
+            with st.expander("📄 Sources"):
+                st.markdown(msg["sources"])
+
+# Chat input
+user_input = selected_quick_q or st.chat_input("Ask about LBSCEK...")
+
+if user_input:
+    # Add user message
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input
+    })
+    
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(user_input)
+    
+    # Generate response
+    with st.chat_message("assistant", avatar="🎓"):
+        with st.spinner("🔍 Searching LBSCEK knowledge base..."):
+            result = process_question(user_input)
+        
+        # Display answer
+        st.markdown(result["answer"])
+        
+        # Display sources
+        sources_text = format_sources(result["sources"])
+        if sources_text:
+            with st.expander("📄 Sources"):
+                st.markdown(sources_text)
+        
+        # Save to session
         st.session_state.messages.append({
             "role": "assistant",
-            "content": WELCOME_MESSAGE,
-            "sources": ""
-        })
-    
-    # Render chat messages
-    render_chat_messages()
-    
-    # Chat input
-    user_input = selected_quick_question or st.chat_input("Ask me anything about LBSCEK...")
-    
-    if user_input:
-        # Add user message
-        st.session_state.messages.append({
-            "role": "user",
-            "content": user_input
+            "content": result["answer"],
+            "sources": sources_text
         })
         
-        # Display user message
-        with st.chat_message("user", avatar="👤"):
-            st.markdown(user_input)
-        
-        # Generate and display response
-        with st.chat_message("assistant", avatar="🎓"):
-            with st.spinner("🔍 Searching LBSCEK knowledge base..."):
-                result = process_user_question(user_input)
-            
-            # Display answer
-            st.markdown(result["answer"])
-            
-            # Format and display sources
-            sources_formatted = format_source_documents(result["sources"])
-            
-            if result["sources"]:
-                with st.expander("📄 View Sources", expanded=False):
-                    st.markdown(sources_formatted)
-            
-            # Save to session state
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": result["answer"],
-                "sources": sources_formatted
-            })
-            
-            # Update stats
+        if result["success"]:
             st.session_state.total_questions += 1
-            
-            if not result["success"]:
-                st.session_state.error_count += 1
-                
-                if "api" in result["answer"].lower() or "key" in result["answer"].lower():
-                    st.info("💡 **Tip:** Make sure your OpenAI API key is valid and has credits.")
-        
-        # Rerun to update UI
-        st.rerun()
-
-# --------------- RUN APPLICATION ---------------
-if __name__ == "__main__":
-    main()
+        else:
+            if "api" in result["answer"].lower() or "key" in result["answer"].lower():
+                st.info("💡 Check your OpenAI API key and credits")
+    
+    st.rerun()
